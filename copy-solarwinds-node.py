@@ -1,20 +1,16 @@
 import requests
 import socket
+import argparse
+import ipaddress
+import re
+import getpass
 from orionsdk import SwisClient
 
 def getIP(hostname:str)->str:
     retval = socket.gethostbyname(hostname)
     return retval
 
-def main():
-    # Solarwinds connection details
-    swServer = 'solarwinds.ci.northwestern.edu'
-    username = 'solarwinds\\'
-    password = ''
-
-    # Source and target node details
-    sourceNodeIP   = ''
-    targetNodeName = ''
+def copy_node(swis:object, sourceNodeIP:str, targetNodeName:str) -> None:
 
     # Allow swis to ignore certificate warnings
     verify = False
@@ -23,26 +19,35 @@ def main():
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     # Resolve DNS for the new host
-    targetNodeIP = getIP(targetNodeName)
+    try:
+        targetNodeIP = getIP(targetNodeName)
+    except Exception as e:
+        raise Exception(" ".join(["Unable resolve IP for target FQDN", targetNodeName, ". Details:", e.args]))
    
-    # Create the SWIS client
-    swis = SwisClient(swServer, username, password)
-    
     # Get source node URI
     # Python understands that this is a dict delivered as JSON
-    response = swis.query("".join(["SELECT Uri FROM Orion.Nodes WHERE IPAddress='",sourceNodeIP,"'"]))
-    sourceNodeURI = response["results"][0]["Uri"]
+    try:
+        response = swis.query("".join(["SELECT Uri FROM Orion.Nodes WHERE IPAddress='",sourceNodeIP,"'"]))
+        sourceNodeURI = response["results"][0]["Uri"]
+    except Exception as e:
+        raise Exception(" ".join(["Unable get source node URI from Solarwinds. Details:", e.args]))
 
     # Get source node properties
     # Python understands that this is a dict delivered as JSON
-    sourceNode = swis.read(sourceNodeURI)
+    try:
+        sourceNode = swis.read(sourceNodeURI)
+    except Exception as e:
+        raise Exception(" ".join(["Unable get properties of source node. Details:", e.args]))
 
     # Define which custom properties will be copied from the source to the target
     nodePropsToCopy = ("MachineType", "ObjectSubType", "SNMPVersion", "Community") 
 
     # Find the polling engine with the smallest current load
-    response = swis.query("SELECT top 1 EngineID FROM Orion.Engines where ServerType='Additional' and DisplayName not like 'NUQ%' and DisplayName not like 'swpoller04%' order by Elements ASC")
-    engineID = response["results"][0]["EngineID"]
+    try:
+        response = swis.query("SELECT top 1 EngineID FROM Orion.Engines where ServerType='Additional' and DisplayName not like 'NUQ%' and DisplayName not like 'swpoller04%' order by Elements ASC")
+        engineID = response["results"][0]["EngineID"]
+    except Exception as e:
+        raise Exception(" ".join(["Unable get polling engine ID from Solarwinds. Details:", e.args]))
 
     # set up property bag for the new node
     targetNodeProps = {}
@@ -54,14 +59,48 @@ def main():
         targetNodeProps[prop] = sourceNode[prop]
 
     # Create a new node
-    targetNodeURI = swis.create('Orion.Nodes', **targetNodeProps)
+    try:
+        targetNodeURI = swis.create('Orion.Nodes', **targetNodeProps)
+    except Exception as e:
+        raise Exception(" ".join(["SWIS error creating new node", targetNodeName ,". Details:", e.args]))
 
-    # Get the new node so we can refer to its properties
-    targetNode = swis.read(targetNodeURI)
+    print(" ".join(["Created new node",targetNodeName]))
+
+    # Get the new node so we can refer to its properties and its NodeID
+    try:
+        targetNode = swis.read(targetNodeURI)
+    except Exception as e:
+        raise Exception(" ".join(["SWIS error reading properties of new node", targetNodeName ,". Details:", e.args]))
+
+    print(" ".join(["New node",targetNodeName,"created with Node ID",str(targetNode["NodeID"])]))
+
+    # Get the set of custom properties values from the source node
+    # Populate a dict with custom properties from the source node. Some members of this structure should not be copied.
+    # Update the custom properties on the new node.
+    try:
+        sourceNodeCustomProps = swis.read(sourceNodeURI + "/CustomProperties")
+    except Exception as e:
+        raise Exception(" ".join(["SWIS error reading custom properties from source node",sourceNodeIP,". Details:", e.args]))
+
+    nodePropsNoCopy = ["NodeID", "DisplayName", "InstanceSiteId", "Uri", "InstanceType", "Description"]
+    targetNodeCustomProps = {}
+    try:
+        for prop in sourceNodeCustomProps:
+            if prop not in nodePropsNoCopy:
+                targetNodeCustomProps[prop]=sourceNodeCustomProps[prop]
+        
+        swis.update(targetNodeURI + "/CustomProperties", **targetNodeCustomProps)
+    except Exception as e:
+        print("SWIS error updating custom properties for node %s (nodeID %s). Details: %s", targetNodeName, targetNode["NodeID"], e.args)
 
     # Get the set of pollers assigned the source node
-    response = swis.query("".join(["SELECT PollerType, Enabled from Orion.Pollers where NetObjectID ='",str(sourceNode["NodeID"]),"'"]))
-    sourceNodePollers = response["results"]
+    # Create a list of poller info
+    # Create pollers on the new node
+    try:
+        response = swis.query("".join(["SELECT PollerType, Enabled from Orion.Pollers where NetObjectID ='",str(sourceNode["NodeID"]),"'"]))
+        sourceNodePollers = response["results"]
+    except Exception as e:
+        raise Exception(" ".join(["SWIS error reading pollers from source node",sourceNodeIP,". Details:", e.args]))
 
     targetNodePollers = []
     for poller in sourceNodePollers:
@@ -76,8 +115,69 @@ def main():
         )
 
     for poller in targetNodePollers:
-        response = swis.create('Orion.Pollers', **poller)
+        try:
+            response = swis.create('Orion.Pollers', **poller)
+        except Exception as e:
+            print("SWIS error creating pollers for node %s (nodeID %s). Details: %s", targetNodeName, targetNode["NodeID"], e.args)
 
+def validate_ip (ip_eval:str) -> None:
+    try:
+        ipaddress.ip_address(ip_eval)
+    except ValueError as e:
+        raise Exception(" ".join([ip_eval, "is not a valid IP address. Details:", e.args]))
+    except Exception as e:
+        raise Exception(" ".join(["Error evaluating", ip_eval, ". Details:", e.args]))
+
+def validate_fqdn (fqdn_eval:str) -> None:
+    maxLen = 255
+    if len(fqdn_eval) > maxLen:
+        raise Exception(" ".join([fqdn_eval, "too long for FQDN. Max length is", str(maxLen)]))
+
+    if fqdn_eval[-1] == ".":
+        fqdn_eval = fqdn_eval[:-1] # strip exactly one dot from the right, if present
+    allowed = re.compile("(?!-)[A-Z\d-]{1,63}(?<!-)$", re.IGNORECASE)
+    
+    for x in fqdn_eval.split("."):
+        if allowed.match(x) == None:
+            raise Exception(" ".join(["is not a valid FQDN. Details:", fqdn_eval, "is not part of a valid FQDN", x]))
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description="Copy a Solarwinds node")
+    parser.add_argument("-s", "--sourceNodeIP", metavar='SOURCE_NODE_IP', action="store", type=str, dest="sourceNodeIP", required=True, help="Source node IP in Solarwinds")
+    parser.add_argument("-S", "--server", metavar="SW_SERVER", action="store", type=str, dest="swisInfo", default="localhost", help="IP or FQDN of Solarwinds server")
+    parser.add_argument("-t", "--targetNodeName", metavar="TARGET_NODE", action="append", type=str, dest="targets", required=True, help="FQDN of new node")
+
+    try:
+        args = parser.parse_args()
+    except Exception as e:
+        print(" ".join(["Could not parse command line parameters. Details:", e.args]))
+
+    # Sanity test for the command line
+    try:
+        try:
+            validate_ip(args.swisInfo)
+        except:
+            validate_fqdn(args.swisInfo)
+
+        validate_ip(args.sourceNodeIP)
+        for target in args.targets:
+            validate_fqdn(target)
+    except Exception as e:
+        print(" ".join(["Illegal value on command line. Details:", e.args]))
+
+    username = input("Username: ")
+    password = getpass.getpass("Password: ")
+    
+    # Create the SWIS connection
+    try:
+        swis = SwisClient(args.swisInfo, username, password)
+    except Exception as e:
+        raise Exception(" ".join(["Unable to connect to SWIS server", args.swisInfo, "Details:", e.args]))
+        
+    # Create new nodes
+    for target in args.targets:
+        try:
+            copy_node(swis=swis, sourceNodeIP=args.sourceNodeIP, targetNodeName=target)
+            print(" ".join(["Copy node from",args.sourceNodeIP,"to",target,"succeeded"]))
+        except Exception as e:
+            print(" ".join(["Copy node", target, "from", args.sourceNodeIP,"failed. Details:"]))
