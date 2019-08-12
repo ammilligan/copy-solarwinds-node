@@ -4,13 +4,14 @@ import argparse
 import ipaddress
 import re
 import getpass
+import time
 from orionsdk import SwisClient
 
 def getIP(hostname:str)->str:
     retval = socket.gethostbyname(hostname)
     return retval
 
-def copy_node(swis:object, sourceNodeIP:str, targetNodeName:str) -> None:
+def copy_node(swis:object, sourceNodeIP:str, targetNodeName:str, waitTime:int=0) -> None:
 
     # Resolve DNS for the new host
     try:
@@ -59,6 +60,11 @@ def copy_node(swis:object, sourceNodeIP:str, targetNodeName:str) -> None:
         raise Exception(" ".join(["SWIS error creating new node", targetNodeName ,". Details:", str(e.args)]))
 
     print(" ".join(["Created new node",targetNodeName]))
+
+    # Pause to give Solarwinds time to perform any actions on node creation
+    if (waitTime > 0):
+        print(" ".join(["Wait",str(waitTime),"seconds while Solarwinds executes new node tasks"]))
+        time.sleep(waitTime)
 
     # Get the new node so we can refer to its properties and its NodeID
     try:
@@ -138,9 +144,10 @@ def validate_fqdn (fqdn_eval:str) -> None:
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="Copy a Solarwinds node")
-    parser.add_argument("-s", "--sourceNodeIP", metavar='SOURCE_NODE_IP', action="store", type=str, dest="sourceNodeIP", required=True, help="Source node IP in Solarwinds")
+    parser.add_argument("-s", "--sourceNodeIP", metavar="SOURCE_NODE_IP", action="store", type=str, dest="sourceNodeIP", required=True, help="Source node IP in Solarwinds")
     parser.add_argument("-S", "--server", metavar="SW_SERVER", action="store", type=str, dest="swisInfo", default="localhost", help="IP or FQDN of Solarwinds server")
     parser.add_argument("-t", "--targetNodeName", metavar="TARGET_NODE", action="append", type=str, dest="targets", required=True, help="FQDN of new node")
+    parser.add_argument("-w", "--wait", metavar="WAIT_TIME", action="store", type=int, dest="waitTime", default=0, required=False, help="Seconds to wait between creating each node and setting custom properties")
     args = parser.parse_args()
 
     # Sanity test for the command line
@@ -177,7 +184,7 @@ if __name__ == '__main__':
     # Create new nodes
     for target in args.targets:
         try:
-            copy_node(swis=swis, sourceNodeIP=args.sourceNodeIP, targetNodeName=target)
+            copy_node(swis=swis, sourceNodeIP=args.sourceNodeIP, targetNodeName=target, waitTime=args.waitTime)
             print(" ".join(["Copy node from",args.sourceNodeIP,"to",target,"succeeded"]))
         except Exception as e:
             print(" ".join(["Copy node", target, "from", args.sourceNodeIP,"failed. Details:", str(e.args)]))

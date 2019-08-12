@@ -21,9 +21,15 @@
 #
 #    -server (Required): The name or IP address of the Solarwinds server.
 #
+#    -wait (Optional, default=0): The number of seconds to wait between creating a new node and setting its custom properties.
+#         This is necessary if the user's access to a new node depends on alert actions taken after the node is created, such
+#         as granting access via the node's Department value. Superusers don't need to set this.
+#
 # Modifications
 # -------------
 # 20190731 MM Added code to copy status and response poller configuration from source node to new node
+# 20190812 MM Added code to wait between creating a node and setting its custom properties, to allow
+#             the Solarwinds alert engine to execute any alert actions taken when the node is created.
 
 
 # Command line parameters
@@ -35,7 +41,11 @@ Param (
     [string] $sourceNodeIP,
 
     [Parameter(Mandatory=$True)]
-    [array] $targetNodeName
+    [array] $targetNodeName,
+
+    [Parameter()]
+    [int] $wait=0
+
 )
 
 # Load the SwisSnapin if not already loaded
@@ -67,8 +77,11 @@ function copy-node () {
         [string] $sourceNodeIP,
 
         [Parameter(Mandatory=$True)]
-        [string] $targetNodeName
-    )
+        [string] $targetNodeName,
+
+        [Parameter()]
+        [int] $waitTime=0
+        )
 
     try {
 
@@ -104,14 +117,16 @@ function copy-node () {
         $targetNodeProps["IP"]=$targetNodeIP
         $targetNodeProps["EngineID"] = get-least-used-poller
 
-        #$targetNodeProps.Keys | foreach {
-        #    Write-Host "Target node property $_ = $($targetNodeProps.Item($_))"
-        #}
-
         # Create the node on the target system
         $targetNodeURI = New-SwisObject $SWIS -EntityType "Orion.Nodes" -Properties $targetNodeProps
-        $targetNode = Get-SwisObject $SWIS -Uri $targetNodeURI
 
+        # Pause to give Solarwinds time to perform any actions on node creation
+        if ($waitTime -ne 0) {
+            Write-Host "Wait $waitTime seconds while Solarwinds executes new node tasks"
+            Start-Sleep $waitTime
+        }
+
+        $targetNode = Get-SwisObject $SWIS -Uri $targetNodeURI
         Write-Host "Created node with NodeID $($targetNode["NodeID"])"
 
         # Get custom properties from the node being copied
@@ -250,7 +265,7 @@ $SWIS= Connect-Swis -Credential $credential -Hostname $server
 $targetNodeName | foreach {
     try {
         Write-Host "Copying $sourceNodeIP to $_"
-        $targetNodeURI = copy-node -sourceNodeIP $sourceNodeIP -targetNodeName $_
+        $targetNodeURI = copy-node -sourceNodeIP $sourceNodeIP -targetNodeName $_ -waitTime $wait
     } catch {
         Write-Host "Unable to copy $sourceNodeIP to $_ . Error details: ", $_.Exception.Message
     }
