@@ -34,19 +34,17 @@ if __name__ == '__main__':
     response = swis.query("".join(["SELECT Uri, ApplicationID, ApplicationTemplateID from Orion.APM.Application where NodeID ='",str(sourceNodeID),"'"]))
     applications = response["results"]
 
-    for app in applications:
-        print("Get Components for application ID ",app["ApplicationID"])
-        response = swis.query("".join(["SELECT Uri, ApplicationID, ComponentID, ComponentName, TemplateID from Orion.APM.Component where ApplicationID ='",str(app["ApplicationID"]),"'"]))
-        components = response["results"]
-        for component in components:
-            print("  Component ID=",component["ComponentID"],"Name=",component["ComponentName"], "Component TemplateID=", component["TemplateID"])
-            response = swis.query("".join(["SELECT Uri, ComponentID, Key, Value, ValueType, Required from Orion.APM.ComponentSetting where ComponentID ='",str(component["ComponentID"]),"'"]))
-            settings = response["results"]
-            for setting in settings:
-                print("    Key=",setting["Key"],"Value=",setting["Value"],"Type=",setting["ValueType"], "Required=",setting["Required"])
+    # for app in applications:
+    #     print("Get Components for application ID ",app["ApplicationID"])
+    #     response = swis.query("".join(["SELECT Uri, ApplicationID, ComponentID, ComponentName, TemplateID from Orion.APM.Component where ApplicationID ='",str(app["ApplicationID"]),"'"]))
+    #     components = response["results"]
+    #     for component in components:
+    #         print("  Component ID=",component["ComponentID"],"Name=",component["ComponentName"], "Component TemplateID=", component["TemplateID"])
+    #         response = swis.query("".join(["SELECT Uri, ComponentID, Key, Value, ValueType, Required from Orion.APM.ComponentSetting where ComponentID ='",str(component["ComponentID"]),"'"]))
+    #         settings = response["results"]
+    #         for setting in settings:
+    #             print("    Key=",setting["Key"],"Value=",setting["Value"],"Type=",setting["ValueType"], "Required=",setting["Required"])
         
-
-    #quit()
 
     # You can set the credential explicitly later
     for app in applications:
