@@ -11,6 +11,27 @@ def getIP(hostname:str)->str:
     retval = socket.gethostbyname(hostname)
     return retval
 
+def validate_ip (ip_eval:str) -> None:
+    try:
+        ipaddress.ip_address(ip_eval)
+    except ValueError as e:
+        raise Exception(" ".join([ip_eval, "is not a valid IP address. Details:", str(e.args)]))
+    except Exception as e:
+        raise Exception(" ".join(["Error evaluating", ip_eval, ". Details:", str(e.args)]))
+
+def validate_fqdn (fqdn_eval:str) -> None:
+    maxLen = 255
+    if len(fqdn_eval) > maxLen:
+        raise Exception(" ".join([fqdn_eval, "too long for FQDN. Max length is", str(maxLen)]))
+
+    if fqdn_eval[-1] == ".":
+        fqdn_eval = fqdn_eval[:-1] # strip exactly one dot from the right, if present
+    allowed = re.compile("(?!-)[A-Z\d-]{1,63}(?<!-)$", re.IGNORECASE)
+    
+    for x in fqdn_eval.split("."):
+        if allowed.match(x) == None:
+            raise Exception(" ".join([fqdn_eval, "is not a valid FQDN. Details:", fqdn_eval, "is not part of a valid FQDN", x]))
+
 def copy_node(swis:object, sourceNodeIP:str, targetNodeName:str, waitTime:int=0) -> None:
 
     # Resolve DNS for the new host
@@ -119,27 +140,6 @@ def copy_node(swis:object, sourceNodeIP:str, targetNodeName:str, waitTime:int=0)
             response = swis.create('Orion.Pollers', **poller)
         except Exception as e:
             print("SWIS error creating pollers for node %s (nodeID %s). Details: %s", targetNodeName, targetNode["NodeID"], str(e.args))
-
-def validate_ip (ip_eval:str) -> None:
-    try:
-        ipaddress.ip_address(ip_eval)
-    except ValueError as e:
-        raise Exception(" ".join([ip_eval, "is not a valid IP address. Details:", str(e.args)]))
-    except Exception as e:
-        raise Exception(" ".join(["Error evaluating", ip_eval, ". Details:", str(e.args)]))
-
-def validate_fqdn (fqdn_eval:str) -> None:
-    maxLen = 255
-    if len(fqdn_eval) > maxLen:
-        raise Exception(" ".join([fqdn_eval, "too long for FQDN. Max length is", str(maxLen)]))
-
-    if fqdn_eval[-1] == ".":
-        fqdn_eval = fqdn_eval[:-1] # strip exactly one dot from the right, if present
-    allowed = re.compile("(?!-)[A-Z\d-]{1,63}(?<!-)$", re.IGNORECASE)
-    
-    for x in fqdn_eval.split("."):
-        if allowed.match(x) == None:
-            raise Exception(" ".join([fqdn_eval, "is not a valid FQDN. Details:", fqdn_eval, "is not part of a valid FQDN", x]))
 
 if __name__ == '__main__':
 
