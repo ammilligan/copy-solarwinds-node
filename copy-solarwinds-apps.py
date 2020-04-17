@@ -31,7 +31,7 @@ def validate_fqdn (fqdn_eval:str) -> None:
         if allowed.match(x) == None:
             raise Exception(" ".join([fqdn_eval, "is not a valid FQDN. Details:", fqdn_eval, "is not part of a valid FQDN", x]))
 
-def copy_apps(swis:object, sourceNodeIP:str, targetNodeName:str) -> None:
+def copy_apps(swis:object, sourceNodeIP:str, targetNode:str) -> None:
     try:
         response = swis.query("".join(["SELECT NodeID from Orion.Nodes where IPAddress ='",sourceNodeIP,"'"]))
         sourceNodeID = response["results"][0]["NodeID"]
@@ -39,10 +39,14 @@ def copy_apps(swis:object, sourceNodeIP:str, targetNodeName:str) -> None:
         raise Exception(" ".join(["Error getting node ID for source Node", sourceNodeIP, ". Details:", str(e.args)]))
 
     try:
-        response = swis.query("".join(["SELECT NodeID from Orion.Nodes where Caption ='",targetNodeName,"'"]))
+        response = swis.query("".join(["SELECT NodeID from Orion.Nodes where Caption ='",targetNode,"' or IPAddress = '",targetNode,"'"]))
+        if len(response["results"]) > 1:
+            raise Exception(" ".join(["Multiple matches for target node", targetNode, ". Details:", str(e.args)]))
+        if len(response["results"]) == 0:
+            raise Exception(" ".join(["No match for target node", targetNode, ". Details:", str(e.args)]))
         targetNodeID = response["results"][0]["NodeID"]
     except Exception as e:
-        raise Exception(" ".join(["Error getting node ID for target node", targetNodeName, ". Details:", str(e.args)]))
+        raise Exception(" ".join(["Error getting node ID for target node", targetNode, ". Details:", str(e.args)]))
 
     try:
         response = swis.query("".join(["SELECT Uri, ApplicationID, ApplicationTemplateID from Orion.APM.Application where NodeID ='",str(sourceNodeID),"'"]))
@@ -102,14 +106,14 @@ def copy_apps(swis:object, sourceNodeIP:str, targetNodeName:str) -> None:
                 )
                 print(newSettingID)
     except Exception as e:
-        raise Exception(" ".join(["Error creating applications on target node", targetNodeName, ". Details:", str(e.args)]))
+        raise Exception(" ".join(["Error creating applications on target node", targetNode, ". Details:", str(e.args)]))
         
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="Copy a Solarwinds node")
     parser.add_argument("-s", "--sourceNodeIP", metavar="SOURCE_NODE_IP", action="store", type=str, dest="sourceNodeIP", required=True, help="Source node IP in Solarwinds")
     parser.add_argument("-S", "--server", metavar="SW_SERVER", action="store", type=str, dest="swisInfo", default="localhost", help="IP or FQDN of Solarwinds server")
-    parser.add_argument("-t", "--targetNodeName", metavar="TARGET_NODE", action="append", type=str, dest="targets", required=True, help="FQDN of new node")
+    parser.add_argument("-t", "--targetNode", metavar="TARGET_NODE", action="append", type=str, dest="targets", required=True, help="FQDN of new node")
     parser.add_argument("-w", "--wait", metavar="WAIT_TIME", action="store", type=int, dest="waitTime", default=0, required=False, help="Seconds to wait between creating each node and setting custom properties")
     args = parser.parse_args()
 
@@ -122,7 +126,10 @@ if __name__ == '__main__':
 
         validate_ip(args.sourceNodeIP)
         for target in args.targets:
-            validate_fqdn(target)
+            try:
+                validate_ip(target)
+            except:
+                validate_fqdn(target)
     except Exception as e:
         print(" ".join(["Illegal value on command line. Details:", str(e.args)]))
         quit()
@@ -147,7 +154,7 @@ if __name__ == '__main__':
     # Copy applications from source node to target nodes
     for target in args.targets:
         try:
-            copy_apps(swis=swis, sourceNodeIP=args.sourceNodeIP, targetNodeName=target)
+            copy_apps(swis=swis, sourceNodeIP=args.sourceNodeIP, targetNode=target)
             print(" ".join(["Copy application monitors from",args.sourceNodeIP,"to",target,"succeeded"]))
         except Exception as e:
             print(" ".join(["Copy application monitors", target, "from", args.sourceNodeIP,"failed. Details:", str(e.args)]))
